@@ -49,17 +49,10 @@ BOOL CdazuoyeView::PreCreateWindow(CREATESTRUCT& cs)
 
 
 
-// 将原始 SetupTexture 函数替换为以下内容：
+// 粗布纹理生成函数
 void CdazuoyeView::SetupTexture()
 {
-    static GLubyte clothTexture[TEX_SIZE][TEX_SIZE][3];
-
-    // 初始化随机种子（建议在 OnCreate 中执行一次即可，这里为演示放在这）
-    // static bool initialized = false;
-    // if (!initialized) {
-    //     srand((unsigned int)time(NULL));
-    //     initialized = true;
-    // }
+	static GLubyte clothTexture[TEX_SIZE][TEX_SIZE][3];//定义纹理数组256*256的3个颜色RGB纹理
 
     // 1. 设置纹理参数（您可以根据图片示例进行调整）
     // 对应示例 (a): p=100, q=100
@@ -78,19 +71,19 @@ void CdazuoyeView::SetupTexture()
             float u = (float)i / (float)(TEX_SIZE - 1);
             float v = (float)j / (float)(TEX_SIZE - 1);
 
+            float A = (float)rand() / RAND_MAX;
             // 应用公式：f(u,v) = A(cos(pu) + cos(qv))
             float f = A * (std::cos(p * u) + std::cos(q * v));
-
+            //f[-2,2]
             // 对 f 进行归一化和缩放，映射到 GLubyte (0-255)
-            // f 的范围理论上从 -2A 到 2A (-2.0 到 2.0)
-            // 我们通过 (f + 2A) / 4A 将其映射到 [0, 1]
-            float normalized_f = (f + 2.0f * A) / (4.0f * A);
+            // 我们通过 (f + 2) / 4 将其映射到 [0, 1]
+            float normalized_f = (f + 2.0f ) / (4.0f );
 
             // 确保不越界 [0, 1]
             if (normalized_f > 1.0f) normalized_f = 1.0f;
             if (normalized_f < 0.0f) normalized_f = 0.0f;
 
-            // 缩放到 0-255
+            // 缩放到 0-255 opengl得颜色范围
             GLubyte gray = (GLubyte)(normalized_f * 255.0f);
 
             // 赋予颜色 (以灰度模式为主，贴近图片)
@@ -102,9 +95,9 @@ void CdazuoyeView::SetupTexture()
 
     // 3. 绑定到 OpenGL
     if (texCloth == 0) {
-        glGenTextures(1, &texCloth);
+		glGenTextures(1, &texCloth);// 生成一个纹理对象ID
     }
-    glBindTexture(GL_TEXTURE_2D, texCloth);
+	glBindTexture(GL_TEXTURE_2D, texCloth);// 绑定纹理对象，后续的纹理操作都作用于这个对象
 
     // 设置纹理过滤（线性过滤）
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -119,63 +112,89 @@ void CdazuoyeView::SetupTexture()
 }
 
 // 圆环绘制核心函数
-void CdazuoyeView::DrawTorus(GLfloat R, GLfloat r, int numMajor, int numMinor)
+void CdazuoyeView::DrawTorus(GLfloat r1, GLfloat r2,
+    int numMajor, int numMinor)
 {
-    float PI = 3.1415926f;
-    float tileFactor = 12.0f; // 纹理重复平铺次数
+    const float PI = 3.1415926f;
+
+    // 纹理平铺次数 纹理重复8次
+    float tileFactor = 8.0f;
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texCloth);
 
-    // 设置物体的基础材质为纯白
-    // 配合 OnCreate 中的 GL_MODULATE，纹理颜色将直接作为漫反射系数计算光照
-    GLfloat mat_diffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    GLfloat mat_ambient[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    // 材质设为白色
+    GLfloat mat_diffuse[] = { 1,1,1,1 };
+    GLfloat mat_ambient[] = { 1,1,1,1 };
+
     glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
     glMaterialfv(GL_FRONT, GL_AMBIENT, mat_ambient);
 
-    for (int i = 0; i < numMajor; i++) {
-        float theta0 = (float)i * 2.0f * PI / numMajor;
-        float theta1 = (float)(i + 1) * 2.0f * PI / numMajor;
+    // α方向圆环大圈
+    for (int i = 0; i < numMajor; i++)
+    {
+        float alpha0 = 2.0f * PI * i / numMajor;
+        float alpha1 = 2.0f * PI * (i + 1) / numMajor;
 
-        float u0 = (float)i / numMajor;
-        float u1 = (float)(i + 1) / numMajor;
+        // v = α / 2π
+        float v0 = (float)i / numMajor;
+        float v1 = (float)(i + 1) / numMajor;
 
         glBegin(GL_QUAD_STRIP);
-        for (int j = 0; j <= numMinor; j++) {
-            float phi = (float)j * 2.0f * PI / numMinor;
-            float v = (float)j / numMinor;
 
-            // ================== 第一个顶点 ==================
-            // 1. 计算并绑定法线 (漫反射光照计算必须要有法线)
-            float nx0 = cosf(phi) * cosf(theta0);
-            float ny0 = cosf(phi) * sinf(theta0);
-            float nz0 = sinf(phi);
-            glNormal3f(nx0, ny0, nz0);
+        // β方向小圈
+        for (int j = 0; j <= numMinor; j++)
+        {
+            float beta = 2.0f * PI * j / numMinor;
 
-            // 2. 绑定纹理坐标并绘制顶点
-            float x0 = (R + r * cosf(phi)) * cosf(theta0);
-            float y0 = (R + r * cosf(phi)) * sinf(theta0);
-            float z0 = r * sinf(phi);
-            glTexCoord2f(u0 * tileFactor, v * tileFactor);
+            // u = β / 2π
+            float u = (float)j / numMinor;
+
+            // ================= 第一个顶点 =================
+
+            // 教材公式
+            float x0 = (r1 + r2 * sinf(beta)) * sinf(alpha0);
+            float y0 = r2 * cosf(beta);
+            float z0 = (r1 + r2 * sinf(beta)) * cosf(alpha0);
+
+            // 法向量
+            float nx0 = sinf(beta) * sinf(alpha0);
+            float ny0 = cosf(beta);
+            float nz0 = sinf(beta) * cosf(alpha0);
+
+			glNormal3f(nx0, ny0, nz0);//法向量用于光照计算
+
+            // uv映射 指定纹理贴到模型哪个位置
+            glTexCoord2f(
+                u * tileFactor,
+                v0 * tileFactor
+            );
+
             glVertex3f(x0, y0, z0);
 
-            // ================== 第二个顶点 ==================
-            // 1. 计算并绑定法线
-            float nx1 = cosf(phi) * cosf(theta1);
-            float ny1 = cosf(phi) * sinf(theta1);
-            float nz1 = sinf(phi);
+            // ================= 第二个顶点 =================
+
+            float x1 = (r1 + r2 * sinf(beta)) * sinf(alpha1);
+            float y1 = r2 * cosf(beta);
+            float z1 = (r1 + r2 * sinf(beta)) * cosf(alpha1);
+
+            float nx1 = sinf(beta) * sinf(alpha1);
+            float ny1 = cosf(beta);
+            float nz1 = sinf(beta) * cosf(alpha1);
+
             glNormal3f(nx1, ny1, nz1);
 
-            // 2. 绑定纹理坐标并绘制顶点
-            float x1 = (R + r * cosf(phi)) * cosf(theta1);
-            float y1 = (R + r * cosf(phi)) * sinf(theta1);
-            float z1 = r * sinf(phi);
-            glTexCoord2f(u1 * tileFactor, v * tileFactor);
+            glTexCoord2f(
+                u * tileFactor,
+                v1 * tileFactor
+            );
+
             glVertex3f(x1, y1, z1);
         }
+
         glEnd();
     }
+
     glDisable(GL_TEXTURE_2D);
 }
 
@@ -200,7 +219,7 @@ int CdazuoyeView::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 
     // 1. 设置 0号光源 的属性 (一盏白色的定向光)
-    GLfloat light_position[] = { 10.0f, 10.0f, 10.0f, 0.0f }; // 光源位置
+	GLfloat light_position[] = { 10.0f, 10.0f, 10.0f, 0.0f }; // 光源位置，从右上前方照射，w=0表示定向光
     GLfloat light_diffuse[] = { 1.0f,  1.0f,  1.0f,  1.0f }; // 光源自身的漫反射强度 (Ip)
     GLfloat light_ambient[] = { 0.3f,  0.3f,  0.3f,  1.0f }; // 环境光，稍微提亮暗部
 
@@ -214,7 +233,7 @@ int CdazuoyeView::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
     // 3. 关键要求实现：设置纹理映射模式为 GL_MODULATE
     // 这行代码指示 OpenGL 将纹理像素值乘以光照计算结果，使纹理充当漫反射系数 (Kd)
-    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);//最终颜色=纹理颜色×光照结果
 
 
 
@@ -232,7 +251,7 @@ void CdazuoyeView::OnDraw(CDC* pDC)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glLoadIdentity();
-    gluLookAt(0.0, 5.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+	gluLookAt(0.0, 5.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);//设置摄像机位置和朝向，从上方和前方观察圆环，y轴向上
 
     // 旋转圆环便于观察
     static float angle = -60.0f;
@@ -254,7 +273,7 @@ void CdazuoyeView::OnSize(UINT nType, int cx, int cy)
     glViewport(0, 0, cx, cy);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(45.0f, (GLfloat)cx / (GLfloat)cy, 1.0f, 100.0f);
+    gluPerspective(45.0f, (GLfloat)cx / (GLfloat)cy, 1.0f, 100.0f);//近大远小，产生3D效果
     glMatrixMode(GL_MODELVIEW);
 }
 
